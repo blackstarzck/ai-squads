@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { GNB } from '@/components/layout/GNB';
+import { PageListPanel } from '@/components/layout/PageListPanel';
 import { LNB } from '@/components/layout/LNB';
 import { MainCanvas } from '@/components/layout/MainCanvas';
 import { ChatPanel } from '@/components/layout/ChatPanel';
@@ -14,6 +15,7 @@ export default function WorkspacePage() {
       <GNB />
       
       <div className="flex flex-1 overflow-hidden pt-14">
+        <PageListPanel />
         <LNB />
         
         <main className="flex-1 h-full overflow-hidden">

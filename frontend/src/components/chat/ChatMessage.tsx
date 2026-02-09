@@ -29,7 +29,7 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
             : "bg-primary text-primary-foreground rounded-tr-none"
         )}>
           <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-          <span className="text-[10px] opacity-50 mt-1 block">
+          <span className="text-[10px] opacity-50 mt-1 block" suppressHydrationWarning>
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>

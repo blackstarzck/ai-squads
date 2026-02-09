@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState, type MouseEvent } from 'react';
+import React, { useCallback, useEffect, useState, useRef, type MouseEvent } from 'react';
 import {
   ReactFlow,
   Background,
@@ -19,102 +19,34 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import ActionNode from '@/components/canvas/ActionNode';
 import FunctionNode from '@/components/canvas/FunctionNode';
 import DataNode from '@/components/canvas/DataNode';
+import MuiComponentNode from '@/components/canvas/MuiComponentNode';
 import ActionEdge from '@/components/canvas/ActionEdge';
+import { SelectionToolbar } from '@/components/canvas/SelectionToolbar';
 import { AgentStatusBar } from '@/components/canvas/AgentStatusBar';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { calculateGridPosition, calculateContainerSize } from '@/lib/gridLayout';
-import { 
-  Layout, 
-  Component, 
-  Database, 
-  Sparkles,
-  MousePointerClick
-} from 'lucide-react';
+import { getMuiCategoryMeta } from '@/lib/muiRegistry';
+import { partitionNodesByEmpty } from '@/lib/nodeUtils';
+import { getDndPayload } from '@/lib/dndNode';
 
 const nodeTypes = {
   action: ActionNode,
   function: FunctionNode,
   data: DataNode,
+  mui: MuiComponentNode,
 };
 
 const edgeTypes = {
   action: ActionEdge,
-};
-
-// 빈 캔버스 안내 컴포넌트
-const EmptyCanvasGuide = ({ onAddNode }: { onAddNode: (type: string) => void }) => {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-      <Card className="max-w-lg pointer-events-auto shadow-lg border-2 border-dashed border-primary/30 bg-background/95 backdrop-blur">
-        <CardContent className="p-8">
-          <div className="text-center mb-6">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
-              <Sparkles className="w-8 h-8 text-primary" />
-            </div>
-            <h2 className="text-xl font-semibold mb-2">서비스 만들기 시작!</h2>
-            <p className="text-muted-foreground">
-              아래 버튼을 눌러 첫 번째 요소를 추가하거나,<br/>
-              오른쪽 채팅창에서 AI에게 요청해보세요.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3 mb-6">
-            <Button 
-              variant="outline" 
-              className="h-auto py-4 flex flex-col items-center gap-2"
-              onClick={() => onAddNode('page')}
-            >
-              <Layout className="w-6 h-6 text-blue-500" />
-              <span className="font-medium">화면 추가</span>
-              <span className="text-xs text-muted-foreground">홈, 로그인 등</span>
-            </Button>
-            <Button 
-              variant="outline" 
-              className="h-auto py-4 flex flex-col items-center gap-2"
-              onClick={() => onAddNode('component')}
-            >
-              <Component className="w-6 h-6 text-purple-500" />
-              <span className="font-medium">구성요소 추가</span>
-              <span className="text-xs text-muted-foreground">버튼, 카드 등</span>
-            </Button>
-            <Button 
-              variant="outline" 
-              className="h-auto py-4 flex flex-col items-center gap-2"
-              onClick={() => onAddNode('data')}
-            >
-              <Database className="w-6 h-6 text-green-500" />
-              <span className="font-medium">데이터 추가</span>
-              <span className="text-xs text-muted-foreground">회원, 상품 등</span>
-            </Button>
-          </div>
-
-          <div className="bg-muted/50 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <MousePointerClick className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-              <div className="text-sm">
-                <p className="font-medium mb-1">이렇게 해보세요</p>
-                <ol className="text-muted-foreground space-y-1">
-                  <li className="flex items-center gap-2">
-                    <span className="bg-primary/20 text-primary w-5 h-5 rounded-full text-xs flex items-center justify-center">1</span>
-                    요소를 추가하고 배치하세요
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="bg-primary/20 text-primary w-5 h-5 rounded-full text-xs flex items-center justify-center">2</span>
-                    노드를 연결하면 동작을 추가할 수 있어요
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="bg-primary/20 text-primary w-5 h-5 rounded-full text-xs flex items-center justify-center">3</span>
-                    AI에게 기능을 요청해보세요
-                  </li>
-                </ol>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
 };
 
 // 메인 플로우 컴포넌트 (useReactFlow 사용을 위해 분리)
@@ -126,22 +58,81 @@ const Flow = () => {
     onEdgesChange, 
     onConnect,
     addNode,
+    removeNodes,
     setSelectedNode,
     setHighlightedNode,
     setNodeParent,
     resizeNode,
+    copyNodes,
+    pasteNodes,
   } = useCanvasStore();
   
-  const { getIntersectingNodes } = useReactFlow();
+  const { getIntersectingNodes, screenToFlowPosition } = useReactFlow();
 
-  const [showGuide, setShowGuide] = useState(true);
+  const [showKeyDeleteDialog, setShowKeyDeleteDialog] = useState(false);
+  const pendingDeleteIds = useRef<string[]>([]);
 
-  // 노드가 추가되면 가이드 숨기기
+  // Delete / Backspace 키 핸들러 — 빈 노드만이면 즉시 삭제, 데이터 노드 포함 시 확인 다이얼로그
+  // Ctrl+C / Ctrl+V 복사 붙여넣기 핸들러
   useEffect(() => {
-    if (nodes.length > 0) {
-      setShowGuide(false);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // input, textarea 등 편집 중일 때는 무시
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      // Ctrl+C / Cmd+C: 복사
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        const selected = nodes.filter((n) => n.selected);
+        if (selected.length === 0) return;
+        e.preventDefault();
+        copyNodes();
+        return;
+      }
+
+      // Ctrl+V / Cmd+V: 붙여넣기
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
+        pasteNodes();
+        return;
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selected = nodes.filter((n) => n.selected);
+        if (selected.length === 0) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const { dataNodes } = partitionNodesByEmpty(selected, edges);
+        if (dataNodes.length === 0) {
+          // 모두 빈 노드 → 즉시 삭제 (다이얼로그 스킵)
+          removeNodes(selected.map((n) => n.id));
+        } else {
+          // 데이터 있는 노드 포함 → 확인 다이얼로그
+          pendingDeleteIds.current = selected.map((n) => n.id);
+          setShowKeyDeleteDialog(true);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [nodes, edges, removeNodes, copyNodes, pasteNodes]);
+
+  // 키보드 삭제 확인 시 실행
+  const handleConfirmKeyDelete = useCallback(() => {
+    if (pendingDeleteIds.current.length > 0) {
+      removeNodes(pendingDeleteIds.current);
+      pendingDeleteIds.current = [];
     }
-  }, [nodes.length]);
+    setShowKeyDeleteDialog(false);
+  }, [removeNodes]);
 
   // 새 노드 추가 핸들러 (동작 제외 - 동작은 엣지에서 추가)
   const handleAddNode = useCallback((type: string) => {
@@ -166,8 +157,42 @@ const Flow = () => {
     };
 
     addNode(newNode);
-    setShowGuide(false);
   }, [addNode]);
+
+  // ── 사이드 패널에서 캔버스로 DnD: dragOver ──
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  // ── 사이드 패널에서 캔버스로 DnD: drop ──
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const payload = getDndPayload(e);
+    if (!payload) return;
+
+    const center = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const nodeW = payload.width ?? 200;
+    const nodeH = payload.height ?? 80;
+    const position = { x: center.x - nodeW / 2, y: center.y - nodeH / 2 };
+
+    const newNode: Node = {
+      id: `${payload.nodeType}-${Date.now()}`,
+      type: payload.flowType,
+      position,
+      data: {
+        label: payload.label,
+        nodeType: payload.nodeType,
+        ...(payload.muiComponentType ? { muiComponentType: payload.muiComponentType } : {}),
+        ...(payload.muiCategory ? { muiCategory: payload.muiCategory } : {}),
+      },
+      ...(payload.width ? { width: payload.width } : {}),
+      ...(payload.height ? { height: payload.height } : {}),
+    };
+
+    addNode(newNode);
+    setSelectedNode(newNode);
+  }, [addNode, setSelectedNode, screenToFlowPosition]);
 
   // 노드 클릭 시 선택
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -176,9 +201,9 @@ const Flow = () => {
 
   // 드래그 중 교차 노드 감지 및 하이라이트
   const handleNodeDrag = useCallback((_: MouseEvent, node: Node) => {
-    // 부모가 될 수 있는 노드 타입만 대상 (component)
+    // 모든 노드가 부모가 될 수 있음
     const intersections = getIntersectingNodes(node).filter(
-      (n) => n.data?.nodeType === 'component' && n.id !== node.id
+      (n) => n.id !== node.id
     );
     
     if (intersections.length > 0) {
@@ -191,9 +216,9 @@ const Flow = () => {
 
   // 드래그 종료 시 부모-자식 관계 설정
   const handleNodeDragStop = useCallback((_: MouseEvent, node: Node) => {
-    // 부모가 될 수 있는 노드 찾기 (component 타입만)
+    // 모든 노드가 부모가 될 수 있음
     const intersections = getIntersectingNodes(node).filter(
-      (n) => n.data?.nodeType === 'component' && n.id !== node.id
+      (n) => n.id !== node.id
     );
     
     // 하이라이트 해제
@@ -289,11 +314,6 @@ const Flow = () => {
 
   return (
     <>
-      {/* 빈 캔버스 가이드 */}
-      {showGuide && nodes.length === 0 && (
-        <EmptyCanvasGuide onAddNode={handleAddNode} />
-      )}
-      
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -303,9 +323,14 @@ const Flow = () => {
         onNodeClick={handleNodeClick}
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
+        deleteKeyCode={null}
+        multiSelectionKeyCode="Shift"
+        selectionOnDrag
         fitView
         selectNodesOnDrag={false}
         className="bg-slate-50 dark:bg-slate-950"
@@ -314,23 +339,53 @@ const Flow = () => {
         <Controls />
         <MiniMap 
           nodeStrokeColor={(n) => {
-            // 노드의 실제 타입(nodeType)에 따른 테두리 색상
             const nodeType = n.data?.nodeType;
             if (nodeType === 'page') return '#3b82f6';      // blue-500
             if (nodeType === 'data') return '#10b981';      // emerald-500
             if (nodeType === 'component') return '#8b5cf6'; // violet-500
+            if (nodeType === 'muiComponent') {
+              const meta = getMuiCategoryMeta(n.data?.muiCategory as any);
+              return meta?.color || '#64748b';
+            }
             return '#eee';
           }}
           nodeColor={(n) => {
-            // 노드의 실제 타입(nodeType)에 따른 배경 색상
             const nodeType = n.data?.nodeType;
             if (nodeType === 'page') return '#dbeafe';      // blue-100
             if (nodeType === 'data') return '#d1fae5';      // emerald-100
             if (nodeType === 'component') return '#ede9fe'; // violet-100
+            if (nodeType === 'muiComponent') {
+              const meta = getMuiCategoryMeta(n.data?.muiCategory as any);
+              return meta?.bgColor || '#f8fafc';
+            }
             return '#fff';
           }}
         />
       </ReactFlow>
+
+      {/* 다중 선택 시 하단 플로팅 툴바 */}
+      <SelectionToolbar />
+
+      {/* 키보드 Delete 키 확인 다이얼로그 */}
+      <AlertDialog open={showKeyDeleteDialog} onOpenChange={setShowKeyDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDeleteIds.current.length}개 노드를 삭제할까요?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              선택된 노드와 연결된 모든 엣지(연결선)가 함께 삭제됩니다.
+              <br />이 작업은 되돌릴 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmKeyDelete}>
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

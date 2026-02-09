@@ -5,55 +5,14 @@ import { Handle, Position, NodeProps, NodeResizer, useNodes } from '@xyflow/reac
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Pencil, Component, FileCode, Grid3X3 } from 'lucide-react';
+import { Pencil, Grid3X3 } from 'lucide-react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { cn } from '@/lib/utils';
 import { getGridSlots } from '@/lib/gridLayout';
+import { getMuiComponent, getMuiCategoryMeta } from '@/lib/muiRegistry';
 import DataSelector from '@/components/canvas/DataSelector';
 
-// 노드 타입별 스타일 설정
-const nodeTypeStyles: Record<string, {
-  icon: React.ElementType;
-  iconColor: string;
-  iconBg: string;
-  label: string;
-  borderColor: string;
-  selectedBorder: string;
-  highlightBorder: string;
-  badgeStyle: string;
-  handleColor: string;
-  headerBg: string;
-  containerBg: string;
-}> = {
-  component: {
-    icon: Component,
-    iconColor: 'text-violet-600',
-    iconBg: 'bg-violet-100 dark:bg-violet-900/30',
-    label: '구성요소',
-    borderColor: 'border-violet-200 dark:border-violet-800',
-    selectedBorder: 'border-violet-500 ring-2 ring-violet-200',
-    highlightBorder: 'border-violet-400 ring-4 ring-violet-300/50 border-dashed',
-    badgeStyle: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
-    handleColor: 'bg-violet-500',
-    headerBg: 'bg-violet-50 dark:bg-violet-950',
-    containerBg: 'bg-violet-50 dark:bg-violet-950',
-  },
-  function: {
-    icon: FileCode,
-    iconColor: 'text-amber-600',
-    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
-    label: '동작',
-    borderColor: 'border-amber-200 dark:border-amber-800',
-    selectedBorder: 'border-amber-500 ring-2 ring-amber-200',
-    highlightBorder: 'border-amber-400 ring-4 ring-amber-300/50 border-dashed',
-    badgeStyle: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
-    handleColor: 'bg-amber-500',
-    headerBg: 'bg-amber-50/50 dark:bg-amber-950/30',
-    containerBg: 'bg-amber-50/30 dark:bg-amber-950/20',
-  },
-};
-
-const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
+const MuiComponentNode = ({ data, selected, id, width, height }: NodeProps) => {
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [labelValue, setLabelValue] = useState(String(data.label || ''));
@@ -61,22 +20,37 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
   const labelInputRef = useRef<HTMLInputElement>(null);
   const descInputRef = useRef<HTMLInputElement>(null);
   const { updateNode, highlightedNodeId } = useCanvasStore();
-  
-  // 모든 노드에서 자식 노드 수 계산
+
+  // MUI 레지스트리에서 컴포넌트 정보 조회
+  const muiComponentType = String(data.muiComponentType || '');
+  const componentDef = useMemo(() => getMuiComponent(muiComponentType), [muiComponentType]);
+  const categoryMeta = useMemo(
+    () => componentDef ? getMuiCategoryMeta(componentDef.category) : undefined,
+    [componentDef]
+  );
+
+  // 컨테이너 여부
+  const isContainer = componentDef?.isContainer ?? false;
+
+  // 자식 노드 수 계산 (컨테이너일 때)
   const allNodes = useNodes();
   const childCount = useMemo(() => {
+    if (!isContainer) return 0;
     return allNodes.filter(n => n.parentId === id).length;
-  }, [allNodes, id]);
+  }, [allNodes, id, isContainer]);
 
-  const nodeType = String(data.nodeType || 'function');
-  const styles = nodeTypeStyles[nodeType] || nodeTypeStyles.function;
-  const IconComponent = styles.icon;
-  
-  // 이 노드가 하이라이트 대상인지 확인
+  // 하이라이트 상태
   const isHighlighted = highlightedNodeId === id;
-  
-  // 자식 노드를 가질 수 있는 컨테이너 모드인지 (모든 타입이 부모 가능 — 자식이 있거나 component 타입)
-  const isContainer = nodeType === 'component' || childCount > 0;
+
+  // 그리드 슬롯 (컨테이너 모드)
+  const gridSlots = useMemo(() => {
+    if (!isContainer) return [];
+    return getGridSlots(width || 400, height || 300);
+  }, [isContainer, width, height]);
+
+  // 카테고리 색상 (인라인 스타일)
+  const color = categoryMeta?.color || '#64748b';
+  const bgColor = categoryMeta?.bgColor || '#f8fafc';
 
   // 데이터 연결 상태
   const selectedTable = String(data.selectedTable || '');
@@ -89,14 +63,6 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
   const handleColumnChange = (columnName: string) => {
     updateNode(id, { selectedColumn: columnName });
   };
-  
-  // 그리드 슬롯 계산 (컨테이너 모드일 때만)
-  const gridSlots = useMemo(() => {
-    if (!isContainer) return [];
-    const containerWidth = width || 300;
-    const containerHeight = height || 200;
-    return getGridSlots(containerWidth, containerHeight);
-  }, [isContainer, width, height]);
 
   useEffect(() => {
     if (isEditingLabel && labelInputRef.current) {
@@ -137,42 +103,57 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
     }
   };
 
-  // 컨테이너 모드: 리사이즈 가능하고 자식 노드를 담을 수 있음
+  // MUI 아이콘 렌더링
+  const IconComponent = componentDef?.icon;
+
+  // MUI 프리뷰 렌더링 (pointerEvents: none)
+  const preview = useMemo(() => {
+    if (!componentDef) return null;
+    try {
+      return componentDef.renderPreview();
+    } catch {
+      return null;
+    }
+  }, [componentDef]);
+
+  // ─── 컨테이너 모드 ───
   if (isContainer) {
     return (
       <>
-        {/* 노드 리사이저 - 선택 시 크기 조절 가능 */}
         <NodeResizer
           isVisible={selected}
-          minWidth={280}
-          minHeight={180}
-          handleStyle={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-          }}
-          lineStyle={{
-            borderWidth: 1,
-          }}
+          minWidth={300}
+          minHeight={200}
+          handleStyle={{ width: 8, height: 8, borderRadius: 4 }}
+          lineStyle={{ borderWidth: 1 }}
         />
-        
+
         <div
           className={cn(
-            'w-full h-full min-w-[280px] min-h-[180px] rounded-xl border-2 shadow-md transition-all flex flex-col',
-            isHighlighted
-              ? styles.highlightBorder
-              : selected
-                ? styles.selectedBorder
-                : styles.borderColor,
-            styles.containerBg
+            'w-full h-full min-w-[300px] min-h-[200px] rounded-xl border-2 shadow-md transition-all flex flex-col',
           )}
+          style={{
+            borderColor: isHighlighted ? color : selected ? color : `${color}40`,
+            backgroundColor: bgColor,
+            ...(isHighlighted ? { boxShadow: `0 0 0 4px ${color}30`, borderStyle: 'dashed' } : {}),
+            ...(selected && !isHighlighted ? { boxShadow: `0 0 0 2px ${color}30` } : {}),
+          }}
         >
-          {/* 헤더 - 상단에 고정 */}
-          <div className={cn('p-3 rounded-t-lg shrink-0', styles.headerBg)}>
+          {/* 헤더 */}
+          <div
+            className="p-3 rounded-t-lg shrink-0"
+            style={{ backgroundColor: `${color}10` }}
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2 flex-1 min-w-0">
-                <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', styles.iconBg)}>
-                  <IconComponent className={cn('w-4 h-4', styles.iconColor)} />
+                {/* MUI 아이콘 */}
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: `${color}20` }}
+                >
+                  {IconComponent && (
+                    <IconComponent style={{ width: 16, height: 16, color }} />
+                  )}
                 </div>
                 {isEditingLabel ? (
                   <Input
@@ -185,7 +166,7 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <CardTitle 
+                  <CardTitle
                     className="text-sm font-bold truncate cursor-pointer hover:text-primary group flex items-center gap-1"
                     onDoubleClick={(e) => {
                       e.stopPropagation();
@@ -197,11 +178,14 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
                   </CardTitle>
                 )}
               </div>
-              <Badge className={cn('text-[10px] h-5 shrink-0 ml-2 border-0', styles.badgeStyle)}>
-                {styles.label}
+              <Badge
+                className="text-[10px] h-5 shrink-0 ml-2 border-0"
+                style={{ backgroundColor: `${color}20`, color }}
+              >
+                {categoryMeta?.labelKo || componentDef?.category || 'MUI'}
               </Badge>
             </div>
-            
+
             {/* 설명 */}
             {isEditingDesc ? (
               <Input
@@ -215,7 +199,7 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <p 
+              <p
                 className="text-xs text-muted-foreground cursor-pointer hover:text-foreground mt-2 truncate group flex items-center gap-1"
                 onDoubleClick={(e) => {
                   e.stopPropagation();
@@ -236,57 +220,78 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
               className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"
             />
           </div>
-          
-          {/* 컨테이너 영역 - 자식 노드들이 들어갈 공간 */}
+
+          {/* MUI 프리뷰 + 컨테이너 영역 */}
           <div className="flex-1 p-2 relative">
+            {/* MUI 컴포넌트 프리뷰 (시각적 전용) */}
+            {preview && (
+              <div
+                className="mb-2"
+                style={{ pointerEvents: 'none', opacity: 0.8 }}
+              >
+                {preview}
+              </div>
+            )}
+
             {/* 빈 컨테이너 안내 또는 자식 수 표시 */}
             {childCount === 0 ? (
-              <div className="absolute inset-2 flex items-center justify-center border-2 border-dashed border-violet-200/50 dark:border-violet-800/50 rounded-lg pointer-events-none">
+              <div
+                className="absolute inset-2 top-auto bottom-2 flex items-center justify-center rounded-lg pointer-events-none"
+                style={{ border: `2px dashed ${color}30`, minHeight: 60 }}
+              >
                 <div className="text-center">
-                  <Grid3X3 className="w-6 h-6 mx-auto mb-1 text-violet-300/50" />
+                  <Grid3X3 className="w-5 h-5 mx-auto mb-1" style={{ color: `${color}40` }} />
                   <p className="text-xs text-muted-foreground/50">
-                    데이터 노드를 여기에 드롭하세요
+                    노드를 여기에 드롭하세요
                   </p>
                 </div>
               </div>
             ) : (
               <div className="absolute bottom-2 right-2 pointer-events-none">
-                <Badge variant="secondary" className="text-[10px] bg-violet-100/80 text-violet-600">
+                <Badge
+                  variant="secondary"
+                  className="text-[10px]"
+                  style={{ backgroundColor: `${color}20`, color }}
+                >
                   {childCount}개 항목
                 </Badge>
               </div>
             )}
           </div>
-          
-          {/* 4방향 Handle - 입력(target) */}
+
+          {/* 4방향 Handle */}
           <Handle type="target" position={Position.Top} id="top" className="w-2.5 h-2.5 bg-muted-foreground/70 hover:bg-muted-foreground hover:scale-125 transition-all" />
           <Handle type="target" position={Position.Left} id="left" className="w-2.5 h-2.5 bg-muted-foreground/70 hover:bg-muted-foreground hover:scale-125 transition-all" />
-          
-          {/* 4방향 Handle - 출력(source) */}
-          <Handle type="source" position={Position.Bottom} id="bottom" className={cn('w-2.5 h-2.5 hover:scale-125 transition-all', styles.handleColor)} />
-          <Handle type="source" position={Position.Right} id="right" className={cn('w-2.5 h-2.5 hover:scale-125 transition-all', styles.handleColor)} />
+          <Handle type="source" position={Position.Bottom} id="bottom" className="w-2.5 h-2.5 hover:scale-125 transition-all" style={{ backgroundColor: color }} />
+          <Handle type="source" position={Position.Right} id="right" className="w-2.5 h-2.5 hover:scale-125 transition-all" style={{ backgroundColor: color }} />
         </div>
       </>
     );
   }
 
-  // 일반 모드 (function 타입 등)
+  // ─── 리프 모드 ───
   return (
-    <Card className={cn(
-      'w-64 shadow-md border-2 transition-all',
-      isHighlighted
-        ? styles.highlightBorder
-        : selected
-          ? styles.selectedBorder
-          : styles.borderColor
-    )}>
-      {/* 헤더 - 노드 타입별 배경색 */}
-      <CardHeader className={cn('p-3 pb-2 rounded-t-lg', styles.headerBg)}>
+    <Card
+      className={cn('w-72 shadow-md border-2 transition-all')}
+      style={{
+        borderColor: isHighlighted ? color : selected ? color : `${color}40`,
+        ...(selected ? { boxShadow: `0 0 0 2px ${color}30` } : {}),
+      }}
+    >
+      {/* 헤더 */}
+      <CardHeader
+        className="p-3 pb-2 rounded-t-lg"
+        style={{ backgroundColor: `${color}08` }}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 flex-1 min-w-0">
-            {/* 아이콘 - 배경 원 */}
-            <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', styles.iconBg)}>
-              <IconComponent className={cn('w-4 h-4', styles.iconColor)} />
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+              style={{ backgroundColor: `${color}20` }}
+            >
+              {IconComponent && (
+                <IconComponent style={{ width: 16, height: 16, color }} />
+              )}
             </div>
             {isEditingLabel ? (
               <Input
@@ -299,7 +304,7 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <CardTitle 
+              <CardTitle
                 className="text-sm font-bold truncate cursor-pointer hover:text-primary group flex items-center gap-1"
                 onDoubleClick={(e) => {
                   e.stopPropagation();
@@ -311,13 +316,27 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
               </CardTitle>
             )}
           </div>
-          <Badge className={cn('text-[10px] h-5 shrink-0 ml-2 border-0', styles.badgeStyle)}>
-            {styles.label}
+          <Badge
+            className="text-[10px] h-5 shrink-0 ml-2 border-0"
+            style={{ backgroundColor: `${color}20`, color }}
+          >
+            {categoryMeta?.labelKo || componentDef?.category || 'MUI'}
           </Badge>
         </div>
       </CardHeader>
 
       <CardContent className="p-3 pt-2">
+        {/* MUI 컴포넌트 프리뷰 (시각적 전용) */}
+        {preview && (
+          <div
+            className="mb-2 p-2 rounded-md flex items-center justify-center"
+            style={{ pointerEvents: 'none', backgroundColor: `${color}05`, border: `1px solid ${color}15` }}
+          >
+            {preview}
+          </div>
+        )}
+
+        {/* 설명 */}
         {isEditingDesc ? (
           <Input
             ref={descInputRef}
@@ -325,12 +344,12 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
             onChange={(e) => setDescValue(e.target.value)}
             onBlur={handleDescSave}
             onKeyDown={(e) => handleKeyDown(e, handleDescSave)}
-            className="h-6 text-xs px-1 py-0 mb-2"
+            className="h-6 text-xs px-1 py-0"
             placeholder="설명을 입력하세요"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <p 
+          <p
             className="text-xs text-muted-foreground cursor-pointer hover:text-foreground hover:bg-muted/50 rounded px-1 py-0.5 -mx-1 transition-colors group flex items-center gap-1"
             onDoubleClick={(e) => {
               e.stopPropagation();
@@ -341,15 +360,8 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
             <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity shrink-0" />
           </p>
         )}
-        
-        {/* 코드 미리보기 (있는 경우) */}
-        {typeof data.code === 'string' && data.code && (
-          <div className={cn('text-xs font-mono p-2 rounded overflow-hidden text-ellipsis whitespace-nowrap mt-2', styles.iconBg)}>
-            {data.code}
-          </div>
-        )}
 
-        {/* 데이터 연결 (일반 모드) */}
+        {/* 데이터 연결 (리프 모드) */}
         <DataSelector
           selectedTable={selectedTable}
           selectedColumn={selectedColumn}
@@ -357,23 +369,21 @@ const FunctionNode = ({ data, selected, id, width, height }: NodeProps) => {
           onColumnChange={handleColumnChange}
           className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"
         />
-        
-        {!isEditingLabel && !isEditingDesc && typeof data.code !== 'string' && (
+
+        {!isEditingLabel && !isEditingDesc && (
           <p className="text-[10px] text-muted-foreground/60 mt-2">
             더블클릭하여 편집
           </p>
         )}
       </CardContent>
-      
-      {/* 4방향 Handle - 입력(target) */}
+
+      {/* 4방향 Handle */}
       <Handle type="target" position={Position.Top} id="top" className="w-2.5 h-2.5 bg-muted-foreground/70 hover:bg-muted-foreground hover:scale-125 transition-all" />
       <Handle type="target" position={Position.Left} id="left" className="w-2.5 h-2.5 bg-muted-foreground/70 hover:bg-muted-foreground hover:scale-125 transition-all" />
-      
-      {/* 4방향 Handle - 출력(source) */}
-      <Handle type="source" position={Position.Bottom} id="bottom" className={cn('w-2.5 h-2.5 hover:scale-125 transition-all', styles.handleColor)} />
-      <Handle type="source" position={Position.Right} id="right" className={cn('w-2.5 h-2.5 hover:scale-125 transition-all', styles.handleColor)} />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="w-2.5 h-2.5 hover:scale-125 transition-all" style={{ backgroundColor: color }} />
+      <Handle type="source" position={Position.Right} id="right" className="w-2.5 h-2.5 hover:scale-125 transition-all" style={{ backgroundColor: color }} />
     </Card>
   );
 };
 
-export default memo(FunctionNode);
+export default memo(MuiComponentNode);

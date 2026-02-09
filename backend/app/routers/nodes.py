@@ -9,6 +9,7 @@ from app.models.node import (
     NodeResponse,
     EdgeCreate,
     EdgeResponse,
+    BatchDeleteRequest,
 )
 
 router = APIRouter()
@@ -58,6 +59,19 @@ async def delete_node(node_id: UUID):
     try:
         await supabase_service.delete_node(str(node_id))
         return {"message": "Node deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/batch-delete")
+async def batch_delete_nodes(request: BatchDeleteRequest):
+    """Delete multiple nodes at once"""
+    try:
+        deleted_count = await supabase_service.delete_nodes_batch(request.node_ids)
+        return {
+            "message": f"{deleted_count} nodes deleted successfully",
+            "deleted_count": deleted_count,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

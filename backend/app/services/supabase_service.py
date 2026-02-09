@@ -112,6 +112,13 @@ class SupabaseService:
     async def delete_node(self, node_id: str) -> None:
         self.client.table("nodes").delete().eq("id", node_id).execute()
 
+    async def delete_nodes_batch(self, node_ids: list[str]) -> int:
+        """Delete multiple nodes at once. Returns the number of deleted nodes."""
+        if not node_ids:
+            return 0
+        result = self.client.table("nodes").delete().in_("id", node_ids).execute()
+        return len(result.data) if result.data else 0
+
     # Edge operations
     async def create_edge(self, edge: EdgeCreate) -> Dict[str, Any]:
         result = (

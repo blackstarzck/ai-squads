@@ -60,6 +60,10 @@ class EdgeCreate(EdgeBase):
     pass
 
 
+class BatchDeleteRequest(BaseModel):
+    node_ids: List[str]
+
+
 class EdgeResponse(EdgeBase):
     id: UUID
     created_at: datetime

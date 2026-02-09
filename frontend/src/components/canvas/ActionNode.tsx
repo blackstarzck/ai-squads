@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Pencil, Layout, Database } from 'lucide-react';
 import { useCanvasStore } from '@/stores/canvasStore';
+import DataSelector from '@/components/canvas/DataSelector';
+import { DB_SCHEMA } from '@/lib/dbSchema';
 
 // 노드 타입별 스타일 설정
 const nodeTypeStyles: Record<string, {
@@ -56,6 +58,21 @@ const ActionNode = ({ data, selected, id }: NodeProps) => {
   const nodeType = String(data.nodeType || 'page');
   const styles = nodeTypeStyles[nodeType] || nodeTypeStyles.page;
   const IconComponent = styles.icon;
+
+  // 데이터 연결 상태
+  const selectedTable = String(data.selectedTable || '');
+  const selectedColumn = String(data.selectedColumn || '');
+
+  const handleTableChange = (tableName: string) => {
+    updateNode(id, {
+      selectedTable: tableName,
+      selectedColumn: '',
+    });
+  };
+
+  const handleColumnChange = (columnName: string) => {
+    updateNode(id, { selectedColumn: columnName });
+  };
 
   useEffect(() => {
     if (isEditingLabel && labelInputRef.current) {
@@ -162,6 +179,15 @@ const ActionNode = ({ data, selected, id }: NodeProps) => {
           </p>
         )}
         
+        {/* 데이터 연결 */}
+        <DataSelector
+          selectedTable={selectedTable}
+          selectedColumn={selectedColumn}
+          onTableChange={handleTableChange}
+          onColumnChange={handleColumnChange}
+          className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"
+        />
+
         {!isEditingLabel && !isEditingDesc && (
           <p className="text-[10px] text-muted-foreground/60 mt-2">
             💡 더블클릭하여 편집

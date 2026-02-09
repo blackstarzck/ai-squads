@@ -5,13 +5,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { 
+import {
   Activity, 
   FileJson, 
   ListTodo, 
@@ -24,9 +26,18 @@ import {
   CheckCircle2,
   Trash2,
   ArrowRight,
-  ArrowLeft
+  ArrowLeft,
+  FileText,
+  PanelsTopLeft,
+  PenTool,
+  X,
+  Boxes,
 } from 'lucide-react';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { usePageContentStore } from '@/stores/pageContentStore';
+import { useProjectStore } from '@/stores/projectStore';
+import { PageContent } from '@/types';
+import { getMuiComponent, getMuiCategoryMeta } from '@/lib/muiRegistry';
 
 // 노드 타입별 아이콘
 const nodeTypeIcons: Record<string, React.ElementType> = {
@@ -34,6 +45,7 @@ const nodeTypeIcons: Record<string, React.ElementType> = {
   component: Component,
   data: Database,
   function: FileCode,
+  muiComponent: Boxes,
 };
 
 // 노드 타입별 한글 라벨
@@ -43,10 +55,35 @@ const nodeTypeLabels: Record<string, string> = {
   data: '데이터',
   function: '동작',
   action: '액션',
+  muiComponent: 'MUI 컴포넌트',
+};
+
+// 섹션별 아이콘/라벨
+const sectionMeta: Record<keyof PageContent, { icon: React.ElementType; label: string }> = {
+  prd: { icon: FileText, label: 'PRD' },
+  screenLayout: { icon: PanelsTopLeft, label: '화면 구성' },
+  wireframe: { icon: PenTool, label: '와이어프레임' },
 };
 
 export const SubPanel = () => {
   const { selectedNode, nodes, edges, removeNode, setSelectedNode } = useCanvasStore();
+  const { selectedItem, contents, updateItem, removeItem, setSelectedItem } = usePageContentStore();
+  const { currentPageId } = useProjectStore();
+
+  // 현재 편집 중인 항목의 실제 데이터
+  const editingItem = useMemo(() => {
+    if (!selectedItem) return null;
+    const pageContent = contents[selectedItem.pageId];
+    if (!pageContent) return null;
+    return pageContent[selectedItem.section]?.find((i) => i.id === selectedItem.itemId) ?? null;
+  }, [selectedItem, contents]);
+
+  // 현재 페이지 이름
+  const editingPageName = useMemo(() => {
+    if (!selectedItem) return '';
+    const pageNode = nodes.find((n) => n.id === selectedItem.pageId);
+    return pageNode ? String(pageNode.data?.label || '이름 없음') : '이름 없음';
+  }, [selectedItem, nodes]);
 
   // 선택된 노드와 연결된 노드들 계산
   const connectedNodes = useMemo(() => {
@@ -97,6 +134,11 @@ export const SubPanel = () => {
     const IconComponent = nodeTypeIcons[nodeType] || ListTodo;
     const typeLabel = nodeTypeLabels[nodeType] || '요소';
 
+    // MUI 컴포넌트 관련 정보
+    const muiComponentType = selectedNode.data?.muiComponentType as string | undefined;
+    const muiDef = muiComponentType ? getMuiComponent(muiComponentType) : undefined;
+    const muiCategoryMeta = muiDef ? getMuiCategoryMeta(muiDef.category) : undefined;
+
     return (
       <div className="space-y-3">
         {/* 노드 헤더 */}
@@ -116,6 +158,39 @@ export const SubPanel = () => {
             </p>
           </div>
         </div>
+
+        {/* MUI 컴포넌트 상세 정보 */}
+        {muiDef && muiCategoryMeta && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm p-2 bg-muted/30 rounded">
+              <span className="text-muted-foreground">컴포넌트</span>
+              <span className="font-medium">{muiDef.label}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm p-2 bg-muted/30 rounded">
+              <span className="text-muted-foreground">카테고리</span>
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: muiCategoryMeta.color }}
+                />
+                <span className="text-xs font-medium">{muiCategoryMeta.labelKo}</span>
+              </span>
+            </div>
+            {muiDef.isContainer && (
+              <div className="flex items-center justify-between text-sm p-2 bg-muted/30 rounded">
+                <span className="text-muted-foreground">유형</span>
+                <Badge variant="outline" className="text-xs">컨테이너</Badge>
+              </div>
+            )}
+            {/* MUI 미리보기 */}
+            <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border">
+              <span className="text-xs text-muted-foreground block mb-2">미리보기</span>
+              <div className="flex items-center justify-center min-h-[48px]" style={{ pointerEvents: 'none' }}>
+                {muiDef.renderPreview()}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 노드 상세 정보 */}
         <div className="space-y-2">
@@ -161,6 +236,99 @@ export const SubPanel = () => {
       </div>
     );
   };
+
+  // ── 페이지 콘텐츠 편집 패널 ──
+  if (selectedItem && editingItem) {
+    const meta = sectionMeta[selectedItem.section];
+    const SectionIcon = meta.icon;
+
+    return (
+      <TooltipProvider>
+        <div className="h-full border-t bg-background flex flex-col">
+          {/* 헤더 */}
+          <div className="px-4 py-3 border-b bg-muted/30 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <SectionIcon className="w-4 h-4 text-primary shrink-0" />
+              <span className="text-xs text-muted-foreground shrink-0">{editingPageName}</span>
+              <span className="text-xs text-muted-foreground">/</span>
+              <Badge variant="secondary" className="text-xs shrink-0">{meta.label}</Badge>
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={() => setSelectedItem(null)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>편집 닫기</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* 편집 폼 */}
+          <ScrollArea className="flex-1">
+            <div className="p-4 space-y-4">
+              {/* 제목 */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">제목</label>
+                <Input
+                  value={editingItem.label}
+                  onChange={(e) =>
+                    updateItem(selectedItem.pageId, selectedItem.section, selectedItem.itemId, {
+                      label: e.target.value,
+                    })
+                  }
+                  placeholder="항목 제목을 입력하세요"
+                  className="h-9"
+                />
+              </div>
+
+              {/* 내용 */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">내용</label>
+                <Textarea
+                  value={editingItem.description}
+                  onChange={(e) =>
+                    updateItem(selectedItem.pageId, selectedItem.section, selectedItem.itemId, {
+                      description: e.target.value,
+                    })
+                  }
+                  placeholder={
+                    selectedItem.section === 'prd'
+                      ? '이 화면에서 필요한 요구사항을 작성하세요...'
+                      : selectedItem.section === 'screenLayout'
+                        ? '화면의 레이아웃과 정보 구조를 작성하세요...'
+                        : '와이어프레임에 대한 설명을 작성하세요...'
+                  }
+                  className="min-h-[200px] resize-none"
+                />
+              </div>
+
+              {/* 삭제 */}
+              <div className="pt-3 border-t">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    removeItem(selectedItem.pageId, selectedItem.section, selectedItem.itemId);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  이 항목 삭제
+                </Button>
+              </div>
+            </div>
+          </ScrollArea>
+        </div>
+      </TooltipProvider>
+    );
+  }
 
   return (
     <TooltipProvider>
