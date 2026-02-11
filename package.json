@@ -1,0 +1,12 @@
+{
+  "name": "ai-squads",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx -y concurrently -k -n FE,BE,AG -c cyan,green,magenta \"cd frontend && pnpm dev\" \"py backend/run.py\" \"py agents/run.py\"",
+    "dev:fe": "cd frontend && pnpm dev",
+    "dev:be": "py backend/run.py",
+    "dev:ag": "py agents/run.py",
+    "install:all": "pnpm --dir frontend install && pip install -r backend/requirements.txt && pip install -r agents/requirements.txt"
+  }
+}

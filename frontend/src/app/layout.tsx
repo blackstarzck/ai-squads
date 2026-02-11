@@ -33,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" className="h-full" suppressHydrationWarning>
-      <body className={`${freesentation.variable} font-sans h-full overflow-hidden bg-background text-foreground`}>
+      <body className={`${freesentation.variable} font-sans h-full overflow-hidden bg-background text-foreground`} suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
